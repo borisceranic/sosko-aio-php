@@ -1,4 +1,6 @@
-FROM php:8.0-fpm
+ARG PHP_IMAGE_VERSION=8.5.6-fpm
+
+FROM php:${PHP_IMAGE_VERSION}
 
 USER root
 # Install packages:
