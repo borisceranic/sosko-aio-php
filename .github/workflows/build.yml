@@ -87,6 +87,11 @@ jobs:
         id: sha
         run: echo "short=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4.1.0
+        with:
+          platforms: arm64
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4.1.0
 
@@ -101,6 +106,7 @@ jobs:
         with:
           context: .
           push: true
+          platforms: linux/amd64,linux/arm64
           build-args: |
             PHP_IMAGE_VERSION=${{ needs.resolve-versions.outputs.php_version }}-fpm
             COMPOSER_IMAGE_VERSION=${{ needs.resolve-versions.outputs.composer_version }}
