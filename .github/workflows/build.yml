@@ -1,0 +1,122 @@
+name: Build and push PHP FPM image
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC
+    - cron: "0 6 * * 1"
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      php_version:
+        description: "Override PHP version (e.g. 8.4.7). Leave empty for auto-detect."
+        required: false
+      composer_version:
+        description: "Override Composer version (e.g. 2.10.1). Leave empty for auto-detect."
+        required: false
+      git_ref:
+        description: "Git ref to build from (branch, tag, or commit SHA). Leave empty for default branch."
+        required: false
+
+env:
+  IMAGE: borisceranic/sosko-aio-php
+
+jobs:
+  resolve-versions:
+    runs-on: ubuntu-latest
+    outputs:
+      php_version: ${{ steps.versions.outputs.php }}
+      php_minor: ${{ steps.versions.outputs.php_minor }}
+      composer_version: ${{ steps.versions.outputs.composer }}
+      composer_major: ${{ steps.versions.outputs.composer_major }}
+    steps:
+      - name: Resolve latest stable PHP FPM version
+        id: versions
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${{ inputs.php_version || '' }}" ]]; then
+            PHP_VERSION="${{ inputs.php_version }}"
+          else
+            # Fetch tags from Docker Hub, find latest non-RC, non-alpine FPM tag
+            PHP_VERSION=$(
+              curl -s 'https://registry.hub.docker.com/v2/repositories/library/php/tags?page_size=100&name=fpm' \
+              | jq -r '.results[].name' \
+              | grep -E '^[0-9]+\.[0-9]+\.[0-9]+-fpm$' \
+              | sed 's/-fpm$//' \
+              | sort -V \
+              | tail -1
+            )
+          fi
+
+          if [[ -n "${{ inputs.composer_version || '' }}" ]]; then
+            COMPOSER_VERSION="${{ inputs.composer_version }}"
+          else
+            COMPOSER_VERSION=$(
+              curl -s 'https://registry.hub.docker.com/v2/repositories/library/composer/tags?page_size=100' \
+              | jq -r '.results[].name' \
+              | grep -E '^2\.[0-9]+\.[0-9]+$' \
+              | sort -V \
+              | tail -1
+            )
+          fi
+
+          PHP_MINOR=$(echo "$PHP_VERSION" | cut -d. -f1,2)
+          COMPOSER_MAJOR=$(echo "$COMPOSER_VERSION" | cut -d. -f1)
+
+          echo "php=${PHP_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "php_minor=${PHP_MINOR}" >> "$GITHUB_OUTPUT"
+          echo "composer=${COMPOSER_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "composer_major=${COMPOSER_MAJOR}" >> "$GITHUB_OUTPUT"
+
+          echo "### Resolved versions" >> "$GITHUB_STEP_SUMMARY"
+          echo "- PHP: **${PHP_VERSION}**" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Composer: **${COMPOSER_VERSION}**" >> "$GITHUB_STEP_SUMMARY"
+
+  build-and-push:
+    needs: resolve-versions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_ref || '' }}
+
+      - name: Short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: |
+            PHP_IMAGE_VERSION=${{ needs.resolve-versions.outputs.php_version }}-fpm
+            COMPOSER_IMAGE_VERSION=${{ needs.resolve-versions.outputs.composer_version }}
+          tags: |
+            ${{ env.IMAGE }}:php${{ needs.resolve-versions.outputs.php_version }}-composer${{ needs.resolve-versions.outputs.composer_version }}-${{ steps.sha.outputs.short }}
+            ${{ env.IMAGE }}:php${{ needs.resolve-versions.outputs.php_minor }}-composer${{ needs.resolve-versions.outputs.composer_major }}
+            ${{ env.IMAGE }}:php${{ needs.resolve-versions.outputs.php_minor }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          echo "### Pushed tags" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ env.IMAGE }}:php${{ needs.resolve-versions.outputs.php_version }}-composer${{ needs.resolve-versions.outputs.composer_version }}-${{ steps.sha.outputs.short }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ env.IMAGE }}:php${{ needs.resolve-versions.outputs.php_minor }}-composer${{ needs.resolve-versions.outputs.composer_major }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ env.IMAGE }}:php${{ needs.resolve-versions.outputs.php_minor }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ env.IMAGE }}:latest" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
