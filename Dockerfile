@@ -4,47 +4,58 @@ FROM php:${PHP_IMAGE_VERSION}
 
 USER root
 # Install packages:
-RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends \
-	nginx \
-	supervisor \
-    wget \
-    mariadb-client \
-    libjpeg-dev \
-    zlib1g-dev \
-    libpng-dev \
-    libwebp-dev \
-    libjpeg62-turbo-dev \
-    libpng-dev \
-    libxpm-dev \
-    libfreetype6-dev \
-    libzip-dev \
-    libmagickwand-dev libmagickcore-dev \
-    libzstd-dev \
-    libcurl4-openssl-dev \
-    pkg-config \
-    libssl-dev \
-    unzip \
-    git \
-&& apt-get clean \
-&& rm -rf /var/lib/apt/lists/*
+RUN DEBIAN_FRONTEND=noninteractive \
+	apt-get update \
+	&& apt-get install -y --no-install-recommends \
+	    nginx \
+	    supervisor \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Force Imagick from github version until https://pecl.php.net/get/imagick is ready for PHP 8
-RUN mkdir -p /usr/src/php/ext/imagick; \
-    curl -fsSL https://github.com/Imagick/imagick/archive/06116aa24b76edaf6b1693198f79e6c295eda8a9.tar.gz | tar xvz -C "/usr/src/php/ext/imagick" --strip 1;
-# Activate PHP extensions
-RUN docker-php-ext-configure gd \
-&& docker-php-ext-install \
-    gd \
+# Configure, build, install and activate PHP extensions
+COPY --from=ghcr.io/mlocati/php-extension-installer /usr/bin/install-php-extensions /usr/local/bin/
+RUN \
+    # php ext config - gd: disable AVIF \
+    IPE_GD_WITHOUTAVIF=1 \
+    \
+    /usr/local/bin/install-php-extensions \
+    # == Composer prerequisites: \
     zip \
+    # \
+    # == Symfony common prereqs: \
+    intl \
+    # \
+    # == Image manipulation: \
+    gd \
+    # - alternative for better image processing: \
+    # imagick \
+    # \
+    # == Databases: \
+    # - MySQL \
     mysqli \
     pdo_mysql \
-    exif \
-    opcache \
-    intl \
-    imagick \
-&& yes | pecl install igbinary redis \
-&& docker-php-ext-enable imagick igbinary redis opcache \
-&& rm -rf /tmp/pear
+    # - Postgres \
+    #pgsql \
+    #pdo_pgsql \
+    # \
+    # == Queues: RabbitMQ & friends \
+    # amqp \
+    # \
+    # == Tracing, logging, profiling \
+    # opentelemetry \
+    # blackfire \
+    # \
+    # == Protobuf & gRPC \
+    # protobuf \
+    # grpc \
+    # \
+    # == Columnar DBs: \
+    # Clickhouse: \
+    # seasclick \
+    # \
+    # == Key-Value stores \
+    # memcached \
+    redis
 
 # Pre-install composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
