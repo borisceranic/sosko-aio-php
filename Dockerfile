@@ -1,4 +1,5 @@
 ARG PHP_IMAGE_VERSION=8.5.6-fpm
+ARG COMPOSER_IMAGE_VERSION=2.10.0
 
 FROM php:${PHP_IMAGE_VERSION}
 
@@ -58,7 +59,7 @@ RUN \
     redis
 
 # Pre-install composer
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+COPY --from=composer:${COMPOSER_IMAGE_VERSION} /usr/bin/composer /usr/bin/composer
 ENV COMPOSER_ALLOW_SUPERUSER=1
 
 # Configure nginx
